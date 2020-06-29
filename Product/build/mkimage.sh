@@ -89,7 +89,7 @@ make_systemimg () {
 		then
 			#size=`ls -l $ANDROID_OUT_DIR/system.img | awk '{print $5;}'`
 			#[ $size -gt "0" ] || { echo "Please make first!!!" && myexit $LINENO; }
-			
+
 			size=419430400 #默认：400M
 			OK=0
 			while [ "$OK" = "0" ]; do

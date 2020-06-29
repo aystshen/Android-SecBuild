@@ -173,7 +173,7 @@ make_systemimg () {
 			else
 				system_size=`ls -l $TOPBAND_OUT_DIR/system.img | awk '{print $5;}'`
 				[ $system_size -gt "0" ] || { echo "Please make first!!!" && myexit $LINENO; }
-				
+
 				ok=0
 				while [ "$ok" = "0" ]; do
 					make_ext4fs -l $system_size  -L system -S $TARGET_FILES_DIR/BOOT/RAMDISK/file_contexts -a system $TOPBAND_OUT_DIR/system.img $TARGET_FILES_DIR/SYSTEM && \
@@ -190,10 +190,10 @@ make_systemimg () {
 	else
 		echo "$TARGET_FILES_DIR/SYSTEM directory not exist!" && myexit $LINENO
 	fi
-	
+
 	echo "done."
 }
-	
+
 make_vendor() {
 	echo "create vendor.img... "
 	if [ -d $TARGET_FILES_DIR/VENDOR  ]; then
@@ -229,12 +229,12 @@ make_oem() {
 make_start() {
 	echo ""
 	echo "================ make image start =============="
-	
+
 	grep -wq "system/extras/verity/build_verity_metadata.py" $TOOLS_DIR/releasetools/build_image.py > /dev/null
 	if [ $? -eq 0 ]; then
 		sed -i "s#system/extras/verity/build_verity_metadata.py#build_verity_metadata.py#g" $TOOLS_DIR/releasetools/build_image.py || myexit $LINENO
 	fi
-	
+
 	grep -wq "build/target/product/security/verity" $TOPBAND_OUT_DIR/system_image_info.txt > /dev/null
 	if [ $? -eq 0 ]; then
 		sed -i "s#build/target/product/security/verity#${TOOLS_DIR}/bin/verity#g" $TOPBAND_OUT_DIR/system_image_info.txt || myexit $LINENO
@@ -252,23 +252,23 @@ make_start() {
 	if [ "$MAKE_ALL" = true ] || [ "$MAKE_BOOT" = true ] ; then
 		make_bootimg
 	fi
-	
+
 	if [ "$MAKE_ALL" = true ] || [ "$MAKE_RECOVERY" = true ] ; then
 		make_recoveryimg
 	fi
-	
+
 	if [ "$MAKE_ALL" = true ] || [ "$MAKE_SYSTEM" = true ] ; then
 		make_systemimg
 	fi
-	
+
 	if [ "$MAKE_ALL" = true ] || [ "$MAKE_VENDOR" = true ] ; then
 		make_vendor
 	fi
-	
+
 	if [ "$MAKE_ALL" = true ] || [ "$MAKE_OEM" = true ] ; then
 		make_oem
 	fi
-	
+
 	echo "================ make image end ================"
 	echo ""
 }

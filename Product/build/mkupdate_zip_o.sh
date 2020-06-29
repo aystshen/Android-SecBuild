@@ -32,18 +32,18 @@ prepare() {
 
 mkUpdate() {
 	cd $TARGET_FILES_DIR
-	
+
 	echo "package $TARGET_FILES_DIR ---> target_files.zip..."
 	rm -f $INTEGRATION_DIR/target_files.zip && zip -qry $INTEGRATION_DIR/target_files.zip .
 	zipinfo -1 $INTEGRATION_DIR/target_files.zip | awk 'BEGIN { FS="SYSTEM/" } /^SYSTEM\// {print "system/" $2}' | fs_config > ./META/filesystem_config.txt 
 	zipinfo -1 $INTEGRATION_DIR/target_files.zip | awk 'BEGIN { FS="BOOT/RAMDISK/" } /^BOOT\/RAMDISK\// {print $2}' | fs_config > ./META/boot_filesystem_config.txt 
 	zipinfo -1 $INTEGRATION_DIR/target_files.zip | awk 'BEGIN { FS="RECOVERY/RAMDISK/" } /^RECOVERY\/RAMDISK\// {print $2}' | fs_config > ./META/recovery_filesystem_config.txt 
 	zip -q $INTEGRATION_DIR/target_files.zip ./META/*filesystem_config.txt || myexit $LINENO
-	
+
 	echo "make update.zip..."
 	ota_from_target_files  -v --block --extracted_input_target_files $INTEGRATION_DIR/target_files -p $TOOLS_DIR -k $TOOLS_DIR/bin/testkey $INTEGRATION_DIR/target_files.zip $TOPBAND_OUT_DIR/$FILENAME || myexit $LINENO
 	rm -f $INTEGRATION_DIR/target_files.zip 
-	
+
 	cd -
 
 	echo "make update.zip ok!!!"

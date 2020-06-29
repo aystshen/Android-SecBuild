@@ -1,7 +1,33 @@
 #!/bin/bash
 
-PRODUCT=$1
-TARGET=$2
+usage()
+{
+	echo "USAGE: ./mkproduct.sh [product] [-t target] [-T test mode]"
+	echo "No ARGS means use default build option"
+	echo "WHERE: -t = set target"
+	echo "       -T = [small]: Only PCBA test; [whole]: Normal firmware with PCBA test"
+	exit 1
+}
+
+PRODUCT=${@: -1}
+TARGET=""
+TEST_MODE="small"
+
+while getopts "t:T:h" opt
+do
+	case $opt in
+		t)
+		TARGET=$OPTARG
+		;;
+		T)
+		TEST_MODE=$OPTARG
+		;;
+		h)
+		usage ;;
+		?)
+		usage ;;
+	esac
+done
 
 CURDIR=$PWD
 PRODUCT_DIR=$CURDIR/../product
@@ -13,7 +39,7 @@ PLATFORM_PACKAGE=$PLATFORM_DIR/$PACKAGE_NAME
 PLATFORM_EXTRACT_PACKAGE=$INTEGRATION_DIR/package_src
 TARGET_FILES_DIR=$INTEGRATION_DIR/target_files
 
-DATE=`date +%Y-%m-%d`
+DATE=`date +%Y%m%d.%H%M%S`
 GIT_COMMIT=`git log -1 |grep "^commit" |awk '{print $2}'`
 
 myexit() {
@@ -44,26 +70,26 @@ checkPlatformPkg() {
 extractPlatformPkg() {
 	echo ""
 	echo "tar xvf $PLATFORM_PACKAGE  $INTEGRATION_DIR/"
-	
+
 	tar xvf $PLATFORM_PACKAGE -C $INTEGRATION_DIR/ || myexit $LINENO
 	checkPlatformPkg
 	unzip $PLATFORM_EXTRACT_PACKAGE/target_files.zip -d $TARGET_FILES_DIR/ || myexit $LINENO
-	
+
 	checkFileAndExit $TARGET_FILES_DIR/BOOT
 	checkFileAndExit $TARGET_FILES_DIR/RECOVERY
 	checkFileAndExit $TARGET_FILES_DIR/SYSTEM
-	
+
 	echo "extract platform package ok!!!"
 }
 
 updateApk() {
 	cd ${PLATFORM_DIR}
-	
+
 	if [ -d ${TARGET_FILES_DIR}/SYSTEM/lib64 ]; then
 		lib64=true
 	fi
 	echo "update apk lib64: ${lib64}"
-	
+
 	for file in *
 	do
 		if [[ "${file}" == *.apk ]]; then
@@ -71,38 +97,38 @@ updateApk() {
 			name=`echo ${file} | awk -F"." '{print $1}'`
 			suffix=`echo ${file} | awk -F"." '{print $2}'`
 			echo "[name]: $name, [suffix]: $suffix"
-			
+
 			if [ -d ${TARGET_FILES_DIR}/SYSTEM/app/${name} ]; then
 				rm -rf ${TARGET_FILES_DIR}/SYSTEM/app/${name}
 			fi
-			
+
 			mkdir -p ${TARGET_FILES_DIR}/SYSTEM/app/${name} || myexit $LINENO
 			mkdir -p ${TARGET_FILES_DIR}/SYSTEM/app/${name}/lib || myexit $LINENO
 			mkdir -p ${TARGET_FILES_DIR}/SYSTEM/app/${name}/lib/arm || myexit $LINENO
 			if [ "$lib64" = true ] ; then
 				mkdir -p ${TARGET_FILES_DIR}/SYSTEM/app/${name}/lib/arm64 || myexit $LINENO
 			fi
-			
+
 			cp -vf ${file} ${TARGET_FILES_DIR}/SYSTEM/app/${name}/ || myexit $LINENO
-			
+
 			unzip -o ${file} lib/*/*.so -d ./${name}
-			
+
 			if [ -d ${name}/lib/armeabi-v7a ]; then
 				cp -vf ${name}/lib/armeabi-v7a/* ${TARGET_FILES_DIR}/SYSTEM/app/${name}/lib/arm/ || myexit $LINENO
 			elif [ -d ${name}/lib/armeabi ]; then
 				cp -vf ${name}/lib/armeabi/* ${TARGET_FILES_DIR}/SYSTEM/app/${name}/lib/arm/ || myexit $LINENO
 			fi
-			
+
 			if [ "$lib64" = true ] && [ -d ${name}/lib/arm64-v8a ]; then
 				cp -vf ${name}/lib/arm64-v8a/* ${TARGET_FILES_DIR}/SYSTEM/app/${name}/lib/arm64/ || myexit $LINENO
 			elif [ "$lib64" = true ] && [ -d ${name}/lib/arm64 ]; then
 				cp -vf ${name}/lib/arm64/* ${TARGET_FILES_DIR}/SYSTEM/app/${name}/lib/arm64/ || myexit $LINENO
 			fi
-			
+
 			rm -rf ./${name}
 		fi
 	done
-	
+
 	cd -
 }
 
@@ -115,17 +141,17 @@ updateProperty(){
 parseConfig() {
 	while read line
 	do
-		if [[ "${line}" == *=* ]]; then	
+		if [[ "${line}" == *=* ]]; then
 			key=`echo ${line} | awk -F"=" '{print $1}'`
 			#value=`echo ${line} | awk -F"=" '{print $2}'`
 			value=`echo ${line} | awk -F'=' '{s="";for(i=2;i<=NF;i++)s=s""(i==NF?$i:$i"=");print s}'`
 			echo "[key]: $key, [value]: $value"
-			
+
 			if [ ${key} == PROP ]; then
 				prop_key=`echo ${value} | awk -F"@" '{print $1}'`
 				prop_value=`echo ${value} | awk -F"@" '{print $2}'`
 				echo "updating prop ${value}"
-				
+
 				if [ ${prop_key} == ro.topband.sw.version ]; then
 					prop_value=${prop_value}.${BUILD_NUMBER}
 					VERSION=${prop_value}
@@ -133,7 +159,7 @@ parseConfig() {
 					let "prop_value+=BUILD_NUMBER"
 					VERSION_CODE=${prop_value}
 				fi
-				
+
 				grep -wq ${prop_key} ${TARGET_FILES_DIR}/SYSTEM/build.prop > /dev/null
 				if [ $? -eq 0 ]; then
 					sed -i "s/${prop_key}.*/${prop_key}=${prop_value}/g" $TARGET_FILES_DIR/SYSTEM/build.prop || myexit $LINENO
@@ -168,23 +194,33 @@ parseConfig() {
 	done < $PRODUCT_DIR/$PRODUCT/config.ini
 }
 
+updateDisplayId(){
+	line=`grep -i "ro.product.model=" ${TARGET_FILES_DIR}/SYSTEM/build.prop`
+	model=`echo ${line} | awk -F"=" '{print $2}'`
+	display_id=${model}-${VERSION}-${BUILD_NUMBER}-${DATE}
+
+	sed -i "s/ro.build.display.id=.*/ro.build.display.id=${display_id}/g" $TARGET_FILES_DIR/SYSTEM/build.prop
+
+	echo "update ro.build.display.id: ${display_id}"
+}
+
 parseTarget() {
 	if [ $TARGET ];then
-	return
+		return
 	fi
 	if [ -f ${TARGET_FILES_DIR}/VENDOR/build.prop ]; then
 		line=`grep -i "ro.board.platform" ${TARGET_FILES_DIR}/VENDOR/build.prop`
 	else
 		line=`grep -i "ro.board.platform" ${TARGET_FILES_DIR}/SYSTEM/build.prop`
 	fi
-	if [[ "${line}" == *=* ]]; then	
+	if [[ "${line}" == *=* ]]; then
 		key=`echo ${line} | awk -F"=" '{print $1}'`
 		value=`echo ${line} | awk -F"=" '{print $2}'`
 
 		if [ ${key} == ro.board.platform ]; then
 			export TARGET=${value}
 		fi
-		
+
 		echo "Target: ${TARGET}"
 		if [ ! ${TARGET} ]; then
 			echo "Parse target failed!" && myexit $LINENO
@@ -194,7 +230,7 @@ parseTarget() {
 
 parseExtends() {
 	line=`grep -i "EXTENDS" $PRODUCT_DIR/$PRODUCT/config.ini`
-	if [[ "${line}" == *=* ]]; then	
+	if [[ "${line}" == *=* ]]; then
 		key=`echo ${line} | awk -F"=" '{print $1}'`
 		value=`echo ${line} | awk -F"=" '{print $2}'`
 
@@ -216,19 +252,19 @@ updateFiles() {
 	if [ ! -e $TARGET_FILES_DIR ]; then
 		echo "$TARGET_FILES_DIR not exist!!!" && myexit $LINENO
 	fi
-	
+
 	echo "  parse target..."
 	[ -f ${TARGET_FILES_DIR}/SYSTEM/build.prop ] && parseTarget
-	
+
 	echo "  parse extends..."
 	[ -f $PRODUCT_DIR/$PRODUCT/config.ini ] && parseExtends
-	
+
 	echo "  copy extends system files..."
 	[ -d $PRODUCT_DIR/$EXTENDS_PRODUCT/system ] && cp -rf $PRODUCT_DIR/$EXTENDS_PRODUCT/system/* $TARGET_FILES_DIR/SYSTEM
 
 	echo "  copy system files..."
 	[ -d $PRODUCT_DIR/$PRODUCT/system ] && cp -rf $PRODUCT_DIR/$PRODUCT/system/* $TARGET_FILES_DIR/SYSTEM
-	
+
 	echo "  copy vendor files..."
 	[ -d $PRODUCT_DIR/$PRODUCT/vendor ] && cp -rf $PRODUCT_DIR/$PRODUCT/vendor/* $TARGET_FILES_DIR/VENDOR
 
@@ -237,31 +273,34 @@ updateFiles() {
 
 	echo "  copy root files..."
 	[ -d $PRODUCT_DIR/$PRODUCT/root ] && cp -rf $PRODUCT_DIR/$PRODUCT/root/* $TARGET_FILES_DIR/BOOT/RAMDISK
-	
+
 	echo "  copy recovery files..."
 	[ -d $PRODUCT_DIR/$PRODUCT/recovery/root ] && cp -rf $PRODUCT_DIR/$PRODUCT/recovery/root/* $TARGET_FILES_DIR/RECOVERY/RAMDISK
-	
+
 	echo "  copy image files..."
 	cp -rf $PLATFORM_EXTRACT_PACKAGE/image/* $TOPBAND_OUT_DIR || myexit $LINENO
-	
+
 	echo "  copy product image files..."
 	cp -rf $PRODUCT_DIR/$PRODUCT/image/* $TOPBAND_OUT_DIR
 
 	echo "  copy rom version files..."
 	cp -rf $PLATFORM_EXTRACT_PACKAGE/rom_git_verson.* $TOPBAND_OUT_DIR/rom_git_verson.txt || myexit $LINENO
-	
+
 	echo "  copy platform tools files..."
 	cp -rf $PLATFORM_EXTRACT_PACKAGE/tools $INTEGRATION_DIR || myexit $LINENO
-	
+
 	echo "  updating apk files..."
 	updateApk
-	
+
 	echo "  updating build.prop files..."
 	updateProperty
-	
+
 	echo "  parse config files..."
 	[ -f $PRODUCT_DIR/$PRODUCT/config.ini ] && parseConfig
-	
+
+	echo " updateDisplayId..."
+	updateDisplayId
+
 	echo "update files ok!!!"
 	echo ""
 	cd -
@@ -271,9 +310,9 @@ makeImage() {
 	cd $CURDIR
 	if [ -f $PRODUCT_DIR/$PRODUCT/*.dtb ]; then
 		if [ -f $PRODUCT_DIR/$PRODUCT/logo.bmp ]; then
-		
+
 			cp -vf ${PRODUCT_DIR}/${PRODUCT}/logo.bmp ./logo.bmp
-			
+
 			if [ -f $PRODUCT_DIR/$PRODUCT/logo_kernel.bmp ]; then
 				echo "make resource.img with logo.bmp logo_kernel.bmp..."
 				cp -vf ${PRODUCT_DIR}/${PRODUCT}/logo_kernel.bmp ./logo_kernel.bmp
@@ -284,9 +323,9 @@ makeImage() {
 				./resource_tool ${PRODUCT_DIR}/${PRODUCT}/*.dtb logo.bmp || myexit $LINENO
 				rm -f ./logo.bmp
 			fi
-			
+
 			cp -vf ./resource.img $TOPBAND_OUT_DIR/ && rm -f ./resource.img
-			
+
 		fi
 	fi
 	if [ $TARGET == "rk3288" ]; then
@@ -311,8 +350,12 @@ makeImage() {
 makeUpdateImg() {
 	cd $CURDIR
 	./mkupdate_img.sh -t ${TARGET} -p $TOPBAND_OUT_DIR/package-file_normal -f ${TARGET}_update_${PRODUCT}_v${VERSION}\(${VERSION_CODE}\)_${GIT_COMMIT:0:7}_${DATE}.img || myexit $LINENO
-	./mkupdate_img.sh -t ${TARGET} -p $TOPBAND_OUT_DIR/package-file_pcba_small -f ${TARGET}_pcba_test_small_${PRODUCT}_v${VERSION}\(${VERSION_CODE}\)_${GIT_COMMIT:0:7}_${DATE}.img || myexit $LINENO
-	#./mkupdate_img.sh -t ${TARGET} -p $TOPBAND_OUT_DIR/package-file_pcba_whole -f ${TARGET}_pcba_test_whole_${PRODUCT}_v${VERSION}\(${VERSION_CODE}\)_${GIT_COMMIT:0:7}_${DATE}.img || myexit $LINENO
+	
+	if [ $TEST_MODE == "small" ]; then
+		./mkupdate_img.sh -t ${TARGET} -p $TOPBAND_OUT_DIR/package-file_pcba_small -f ${TARGET}_pcba_test_small_${PRODUCT}_v${VERSION}\(${VERSION_CODE}\)_${GIT_COMMIT:0:7}_${DATE}.img || myexit $LINENO
+	elif [ $TEST_MODE == "whole" ]; then
+		./mkupdate_img.sh -t ${TARGET} -p $TOPBAND_OUT_DIR/package-file_pcba_whole -f ${TARGET}_pcba_test_whole_${PRODUCT}_v${VERSION}\(${VERSION_CODE}\)_${GIT_COMMIT:0:7}_${DATE}.img || myexit $LINENO
+	fi
 	cd -
 }
 
@@ -336,17 +379,12 @@ echo ""
 echo "======= make product:$PRODUCT start ======"
 startTime=`date`
 
+echo "PRODUCT: ${PRODUCT}"
+echo "TARGET: ${TARGET}"
+echo "TEST_MODE: ${TEST_MODE}"
+
 if [ ! $PRODUCT ]; then
-	echo "usage: "
-	for file in $PRODUCT_DIR/*
-	do
-		if test -d ${file}
-		then
-			echo "	[mkproduct.sh ${file##*/}]"
-		fi
-	done
-	echo ""
-	myexit $LINENO
+	usage
 elif [ ! -d $PRODUCT_DIR/$PRODUCT ]; then
 	echo "Device: $PRODUCT not exist!!!" && myexit $LINENO
 fi
@@ -384,8 +422,6 @@ makeUpdateImg
 makeUpdateZip
 
 rm -rf $INTEGRATION_DIR
-rm -rf $PLATFORM_DIR/*
-rm -rf $TOPBAND_OUT_DIR/system.img
 
 endTime=`date`
 echo ""
